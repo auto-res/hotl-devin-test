@@ -19,7 +19,7 @@ class LoRANorm(nn.Module):
         lora_dropout_p (float): Dropout probability for LoRA layers. Default: 0.0
         lora_alpha (float): Scaling factor for LoRA. Default: 1
     """
-    def __init__(self, fan_in, fan_out, fan_in_fan_out=False, rank=4, lora_dropout_p=0.0, lora_alpha=1):
+    def __init__(self, fan_in, fan_out, fan_in_fan_out=False, rank=4, lora_dropout_p=0.0, lora_alpha=1.0):
         super().__init__()
         # Handle weight matrix layout
         self.swap = (lambda x: (x[1], x[0])) if fan_in_fan_out else (lambda x: x)
@@ -29,9 +29,10 @@ class LoRANorm(nn.Module):
         self.lora_B = nn.Parameter(torch.zeros(self.swap((fan_out, rank))))
         nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))  # Initialize using kaiming uniform
         
-        # LoRA scaling
-        self.lora_alpha, self.rank = lora_alpha, rank
-        self.scaling = lora_alpha / rank
+        # LoRA scaling (ensure float)
+        self.lora_alpha = float(lora_alpha)
+        self.rank = rank
+        self.scaling = self.lora_alpha / float(rank)
         
         # Dropout handling
         self.lora_dropout = nn.Dropout(p=lora_dropout_p) if lora_dropout_p > 0 else lambda x: x
@@ -80,8 +81,18 @@ class LoRANorm(nn.Module):
         return out
 
     @classmethod
-    def from_linear(cls, layer, rank=4, lora_dropout_p=0.0, lora_alpha=1):
-        """Create LoRANorm from a linear layer."""
+    def from_linear(cls, layer, rank=4, lora_dropout_p=0.0, lora_alpha=1.0):
+        """Create LoRANorm from a linear layer.
+        
+        Args:
+            layer (nn.Linear): Linear layer to convert
+            rank (int): Rank for low-rank approximation
+            lora_dropout_p (float): Dropout probability
+            lora_alpha (float): LoRA scaling factor
+            
+        Returns:
+            LoRANorm: Initialized LoRANorm module
+        """
         fan_out, fan_in = layer.weight.shape
         return cls(
             fan_in, fan_out, fan_in_fan_out=False,
