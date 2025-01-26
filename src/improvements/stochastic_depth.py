@@ -41,8 +41,8 @@ class StochasticDepthWRN(WideResNet):
     
     def __init__(self, depth=28, width_factor=10, death_rate=0.5, num_classes=100):
         self.depth = depth  # Store depth as instance variable
+        self.death_rate = death_rate  # Store death_rate before super().__init__
         super().__init__(depth, width_factor, dropout=0.0, num_classes=num_classes)
-        self.death_rate = death_rate
         
     def _make_layer(self, in_planes, out_planes, num_blocks, stride, dropout):
         """Override to use StochasticDepthBlock with linearly increasing death rate."""
