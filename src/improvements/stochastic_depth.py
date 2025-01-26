@@ -40,6 +40,7 @@ class StochasticDepthWRN(WideResNet):
     """
     
     def __init__(self, depth=28, width_factor=10, death_rate=0.5, num_classes=100):
+        self.depth = depth  # Store depth as instance variable
         super().__init__(depth, width_factor, dropout=0.0, num_classes=num_classes)
         self.death_rate = death_rate
         

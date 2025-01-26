@@ -40,6 +40,7 @@ class WideResNet(nn.Module):
     def __init__(self, depth=28, width_factor=10, dropout=0.0, num_classes=100):
         super().__init__()
         assert (depth - 4) % 6 == 0, 'depth should be 6n+4'
+        self.depth = depth  # Store depth as instance variable
         n = (depth - 4) // 6
         
         # Widths for each stage
