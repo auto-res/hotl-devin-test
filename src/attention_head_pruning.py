@@ -138,20 +138,23 @@ def prune_attention_heads(
             if head_size is None:
                 raise ValueError("head_size must be provided when preserve_output_size=True")
                 
-            # Calculate dimensions for the new layer
-            head_mask = mask.view(-1)[:num_heads]
-            remaining_heads = head_mask.sum().item()
-            new_input_size = remaining_heads * head_size
-            
-            # Reshape weight matrix to work with heads
+            # Calculate number of heads from weight dimensions
             old_weight = layer.weight
             num_heads = old_weight.size(1) // head_size
             
-            # Reshape to [hidden_size, num_heads, head_size]
-            W = old_weight.view(old_weight.size(0), num_heads, head_size)
-            
             # Create head-level mask by reshaping the input mask
             head_mask = mask.view(-1)[:num_heads]
+            
+            # Ensure at least one head is kept
+            if head_mask.sum().item() == 0:
+                print("Warning: Cannot prune all heads. Keeping the first head.")
+                head_mask[0] = True
+            
+            remaining_heads = head_mask.sum().item()
+            new_input_size = remaining_heads * head_size
+            
+            # Reshape to [hidden_size, num_heads, head_size]
+            W = old_weight.view(old_weight.size(0), num_heads, head_size)
             
             # Select only the heads we want to keep
             W = W[:, head_mask.bool(), :]
@@ -190,11 +193,6 @@ def prune_attention_heads(
             new_layer.weight.data = W
             if b is not None:
                 new_layer.bias.data = b
-        
-        # Initialize the new layer with the pruned weights
-        new_layer.weight.data = W
-        if b is not None:
-            new_layer.bias.data = b
             
         return new_layer
 
