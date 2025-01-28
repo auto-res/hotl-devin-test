@@ -179,11 +179,6 @@ def prune_attention_heads(
             new_layer.bias.data = b
             
         return new_layer
-        
-        new_layer.weight.data = W
-        if b is not None:
-            new_layer.bias.data = b
-        return new_layer
 
     # Get the attention configuration
     head_size = attention_module.head_dim if hasattr(attention_module, 'head_dim') else (
@@ -266,12 +261,14 @@ def prune_attention_heads(
         else:  # GPT style
             attention_module.out_proj = prune_linear_layer(attention_module.out_proj, qkv_mask, dim=1, preserve_output_size=True)
     elif hasattr(attention_module, 'query'):  # BERT style
-        attention_module.query = prune_linear_layer(attention_module.query, expanded_mask)
-        attention_module.key = prune_linear_layer(attention_module.key, expanded_mask)
-        attention_module.value = prune_linear_layer(attention_module.value, expanded_mask)
+        attention_module.query = prune_linear_layer(attention_module.query, q_mask, dim=0)
+        attention_module.key = prune_linear_layer(attention_module.key, kv_mask, dim=0)
+        attention_module.value = prune_linear_layer(attention_module.value, kv_mask, dim=0)
         attention_module.output.dense = prune_linear_layer(attention_module.output.dense,
-                                                         expanded_mask,
-                                                         dim=1)
+                                                         qkv_mask,
+                                                         dim=1,
+                                                         preserve_output_size=True,
+                                                         head_size=head_size)
 
 def prune_transformer(
     model: PreTrainedModel,
