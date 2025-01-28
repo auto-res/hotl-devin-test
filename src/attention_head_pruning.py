@@ -169,19 +169,31 @@ def prune_attention_heads(
             new_layer = nn.Linear(new_input_size, hidden_size,
                               bias=layer.bias is not None).to(layer.weight.device)
             
-            # Set the weights and bias
+            # Debug prints to understand shapes
+            print(f"Original weight shape: {layer.weight.shape}")
+            print(f"W shape before setting: {W.shape}")
+            print(f"Expected input size: {new_input_size}")
+            print(f"Expected output size: {hidden_size}")
+            print(f"Number of heads: {num_heads}, Remaining heads: {remaining_heads}")
+            
             # For output projection in PyTorch Linear layer:
-            # - weight shape should be [out_features, in_features]
-            # - in our case: [hidden_size, new_input_size]
-            # W is already in shape [hidden_size, new_input_size], so no transpose needed
+            # weight shape should be [out_features, in_features]
+            # Reshape W to match the expected dimensions
+            if 'o_proj' in layer_name:
+                # For output projection, we need [hidden_size, head_size * remaining_heads]
+                W = W.view(hidden_size, -1)
+            
+            # Set the weights and bias
             new_layer.weight.data = W.contiguous()
             if layer.bias is not None:
                 new_layer.bias.data = layer.bias.clone()
             
             # Scale the weights to maintain output magnitude
-            # For LLaMA's output projection, we need to scale based on the change in head count
             scale = (num_heads / remaining_heads) ** 0.5
             new_layer.weight.data = new_layer.weight.data * scale
+            
+            # Debug print final shape
+            print(f"Final weight shape: {new_layer.weight.shape}\n")
             
             return new_layer
             
