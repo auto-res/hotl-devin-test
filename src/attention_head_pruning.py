@@ -139,8 +139,8 @@ def prune_attention_heads(
                 raise ValueError("head_size must be provided when preserve_output_size=True")
                 
             # For LLaMA's grouped-query attention, handle output projection carefully
-            old_weight = layer.weight
-            hidden_size = old_weight.size(0)  # Output dimension should match hidden_size
+            old_weight = layer.weight  # Shape: [hidden_size, num_heads * head_size]
+            hidden_size = old_weight.size(0)
             
             # Calculate number of query heads (not key-value heads)
             num_heads = old_weight.size(1) // head_size
@@ -159,15 +159,26 @@ def prune_attention_heads(
             # Reshape to [hidden_size, num_heads, head_size]
             W = old_weight.view(hidden_size, num_heads, head_size)
             
-            # Select only the heads we want to keep
-            W = W[:, head_mask.bool(), :]
+            # Select only the heads we want to keep and maintain correct dimensions
+            W = W[:, head_mask.bool(), :]  # Shape: [hidden_size, remaining_heads, head_size]
             
-            # Reshape back to [hidden_size, new_input_size]
+            # Reshape to [hidden_size, remaining_heads * head_size]
             W = W.reshape(hidden_size, new_input_size)
             
+            # Create new layer with correct dimensions
+            new_layer = nn.Linear(new_input_size, hidden_size,
+                              bias=layer.bias is not None).to(layer.weight.device)
+            
+            # Set the weights and bias, making sure to transpose W correctly
+            # For output projection, we need [hidden_size, new_input_size]
+            new_layer.weight.data = W.transpose(0, 1).contiguous()
+            if layer.bias is not None:
+                new_layer.bias.data = layer.bias.clone()
+            
             # Scale the weights to maintain output magnitude
-            # For LLaMA, we need to be careful with the scaling factor
-            W = W * (num_heads / remaining_heads) ** 0.5
+            new_layer.weight.data = new_layer.weight.data * (num_heads / remaining_heads) ** 0.5
+            
+            return new_layer
             
             # Create new layer with same output size but adjusted input size
             new_layer = nn.Linear(new_input_size, layer.out_features,
