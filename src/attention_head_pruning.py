@@ -106,7 +106,7 @@ def prune_attention_heads(
                           mask: torch.Tensor,
                           dim: int = 0,
                           preserve_output_size: bool = False,
-                          head_size: int = None) -> nn.Linear:
+                          head_size: Optional[int] = None) -> nn.Linear:
         """Prune a linear layer to keep only certain indices along a dimension.
         
         Args:
@@ -114,6 +114,7 @@ def prune_attention_heads(
             mask: Boolean mask indicating which indices to keep
             dim: Dimension to prune (0 for output features, 1 for input features)
             preserve_output_size: If True, maintain the original output size
+            head_size: Size of each attention head
         """
         # Move mask to the same device as the layer
         mask = mask.to(layer.weight.device)
@@ -132,46 +133,63 @@ def prune_attention_heads(
         max_dim = layer.weight.size(dim)
         valid_indices = indices[indices < max_dim]
         
-        # For output projection (dim=1), we need special handling
-        if dim == 1:
-            # For output projection in grouped-query attention:
-            # The input size should be the concatenated size of remaining q and kv heads
-            remaining_heads = mask.sum().item() // head_size
+        if dim == 1 and preserve_output_size:
+            # For output projection, we need to handle the concatenated q/kv heads
+            if head_size is None:
+                raise ValueError("head_size must be provided when preserve_output_size=True")
+                
+            # Calculate dimensions for the new layer
+            head_mask = mask.view(-1)[:num_heads]
+            remaining_heads = head_mask.sum().item()
             new_input_size = remaining_heads * head_size
             
-            # Ensure new_input_size doesn't exceed hidden_size
-            new_input_size = min(new_input_size, layer.weight.size(0))
+            # Reshape weight matrix to work with heads
+            old_weight = layer.weight
+            num_heads = old_weight.size(1) // head_size
             
-            # Select the input features we want to keep
-            W = layer.weight.index_select(dim, valid_indices).clone().detach()
+            # Reshape to [hidden_size, num_heads, head_size]
+            W = old_weight.view(old_weight.size(0), num_heads, head_size)
             
-            # Ensure W has the correct shape
-            if W.size(1) != new_input_size:
-                if W.size(1) < new_input_size:
-                    # Pad if needed
-                    pad_size = new_input_size - W.size(1)
-                    pad = torch.zeros(W.size(0), pad_size, device=W.device)
-                    W = torch.cat([W, pad], dim=1)
-                else:
-                    # Truncate if too large
-                    W = W[:, :new_input_size]
+            # Create head-level mask by reshaping the input mask
+            head_mask = mask.view(-1)[:num_heads]
             
-            b = layer.bias.clone().detach() if layer.bias is not None else None
+            # Select only the heads we want to keep
+            W = W[:, head_mask.bool(), :]
+            
+            # Reshape back to [hidden_size, new_input_size]
+            W = W.reshape(old_weight.size(0), new_input_size)
+            
+            # Scale the weights to maintain output magnitude
+            W = W * (num_heads / remaining_heads) ** 0.5
             
             # Create new layer with same output size but adjusted input size
             new_layer = nn.Linear(new_input_size, layer.out_features,
                                 bias=layer.bias is not None).to(layer.weight.device)
+            
+            # Set the weights and bias
+            new_layer.weight.data = W
+            if layer.bias is not None:
+                new_layer.bias.data = layer.bias.clone()
         else:
             # For query/key/value projections (dim=0), standard pruning
-            W = layer.weight.index_select(dim, valid_indices).clone().detach()
+            W = layer.weight.index_select(dim, valid_indices).clone()
             if layer.bias is not None:
-                b = layer.bias[valid_indices].clone().detach()
+                b = layer.bias[valid_indices].clone() if dim == 0 else layer.bias.clone()
             else:
                 b = None
             
-            # Create new layer with reduced output size
-            new_layer = nn.Linear(layer.in_features, len(valid_indices),
-                                bias=layer.bias is not None).to(layer.weight.device)
+            # Create new layer with appropriate dimensions
+            if dim == 0:
+                new_layer = nn.Linear(layer.in_features, len(valid_indices),
+                                    bias=layer.bias is not None).to(layer.weight.device)
+            else:
+                new_layer = nn.Linear(len(valid_indices), layer.out_features,
+                                    bias=layer.bias is not None).to(layer.weight.device)
+            
+            # Set the weights and bias
+            new_layer.weight.data = W
+            if b is not None:
+                new_layer.bias.data = b
         
         # Initialize the new layer with the pruned weights
         new_layer.weight.data = W
