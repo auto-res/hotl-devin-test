@@ -138,8 +138,11 @@ def prune_attention_heads(
             if head_size is None:
                 raise ValueError("head_size must be provided when preserve_output_size=True")
                 
-            # Calculate number of heads from weight dimensions
+            # For LLaMA's grouped-query attention, handle output projection carefully
             old_weight = layer.weight
+            hidden_size = old_weight.size(0)  # Output dimension should match hidden_size
+            
+            # Calculate number of query heads (not key-value heads)
             num_heads = old_weight.size(1) // head_size
             
             # Create head-level mask by reshaping the input mask
@@ -154,15 +157,16 @@ def prune_attention_heads(
             new_input_size = remaining_heads * head_size
             
             # Reshape to [hidden_size, num_heads, head_size]
-            W = old_weight.view(old_weight.size(0), num_heads, head_size)
+            W = old_weight.view(hidden_size, num_heads, head_size)
             
             # Select only the heads we want to keep
             W = W[:, head_mask.bool(), :]
             
             # Reshape back to [hidden_size, new_input_size]
-            W = W.reshape(old_weight.size(0), new_input_size)
+            W = W.reshape(hidden_size, new_input_size)
             
             # Scale the weights to maintain output magnitude
+            # For LLaMA, we need to be careful with the scaling factor
             W = W * (num_heads / remaining_heads) ** 0.5
             
             # Create new layer with same output size but adjusted input size
@@ -273,7 +277,14 @@ def prune_attention_heads(
         
         # For output projection, we need to handle both q and kv dimensions
         if hasattr(attention_module, 'o_proj'):  # LLaMA style
-            attention_module.o_proj = prune_linear_layer(attention_module.o_proj, qkv_mask, dim=1, preserve_output_size=True, head_size=head_size)
+            # For LLaMA models with grouped-query attention, output projection only depends on query heads
+            attention_module.o_proj = prune_linear_layer(
+                attention_module.o_proj,
+                q_mask,  # Use query mask instead of qkv_mask for output projection
+                dim=1,
+                preserve_output_size=True,
+                head_size=head_size
+            )
         else:  # GPT style
             attention_module.out_proj = prune_linear_layer(attention_module.out_proj, qkv_mask, dim=1, preserve_output_size=True)
     elif hasattr(attention_module, 'query'):  # BERT style
