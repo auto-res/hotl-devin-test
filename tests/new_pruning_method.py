@@ -10,6 +10,7 @@ def train_with_pruning_method(pruning_func):
         per_device_train_batch_size=2,
         gradient_accumulation_steps=4,
         warmup_steps=5,
+        num_train_epochs=1,
         learning_rate=2e-4,
         logging_steps=1,
         weight_decay=0.01,
