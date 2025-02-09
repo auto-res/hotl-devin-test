@@ -1,7 +1,10 @@
+import pytest
 import torch
 from trl import SFTTrainer, SFTConfig
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from datasets import load_dataset
+
+from src.pruning import create_pruning_function
 
 
 def train_with_pruning_method(pruning_func):
@@ -56,9 +59,18 @@ def train_with_pruning_method(pruning_func):
     return model
 
 
+@pytest.fixture
+def pruning_func():
+    return create_pruning_function(
+        pruning_ratio=0.2,
+        importance_metric="weight_magnitude",
+        layer_pooling="mean"
+    )
+
 def test_pruning_method(pruning_func):
     try:
         train_with_pruning_method(pruning_func)
-        return True
-    except:
-        return False
+        assert True, "Training completed successfully"
+    except Exception as e:
+        print(f"Error during pruning/training: {str(e)}")
+        assert False, f"Training failed with error: {str(e)}"
