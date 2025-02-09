@@ -1,7 +1,7 @@
 import torch
 from trl import SFTTrainer, SFTConfig
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from datasets import load_dataset
+from datasets import load_dataset, Dataset
 
 
 def train_with_pruning_method(pruning_func):
@@ -42,7 +42,7 @@ def train_with_pruning_method(pruning_func):
         return {'text': texts}
     dataset = load_dataset("openai/gsm8k", "main")
     dataset = dataset["train"].map(_format_gsm8k, batched=True)
-    dataset = dataset[:32]
+    dataset = Dataset.from_dict(dataset[:32])
 
     # Apply new pruning method
     model = pruning_func(model)
