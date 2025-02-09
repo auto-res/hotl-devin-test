@@ -29,8 +29,8 @@ class WeightMagnitudeImportance(HeadImportanceMetric):
                 
                 # Get query weights and compute magnitude
                 q_weights = module.q_proj.weight  # [num_heads * head_dim, hidden_size]
-                head_dim = module.head_dim
-                num_heads = module.num_attention_heads
+                head_dim = model.config.hidden_size // model.config.num_attention_heads
+                num_heads = model.config.num_attention_heads
                 
                 # Reshape to [num_heads, head_dim, hidden_size]
                 reshaped_weights = q_weights.view(num_heads, head_dim, -1)
