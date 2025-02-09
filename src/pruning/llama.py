@@ -144,6 +144,8 @@ def prune_llama_model(
     model: nn.Module,
     config: PruningConfig = PruningConfig()
 ) -> nn.Module:
+    print(f"Starting pruning with config: {config}")
+    print(f"Model config: {model.config}")
     """Prune attention heads in LlamaForCausalLM model.
     
     Args:
