@@ -82,7 +82,7 @@ def prune_attention_heads(
     if maintain_gqa_ratio:
         # Calculate new number of KV heads
         heads_per_kv = old_num_heads // old_num_kv_heads
-        new_num_kv_heads = new_num_heads // heads_per_kv
+        new_num_kv_heads = max(1, new_num_heads // heads_per_kv)
         
         # Update module attributes
         attention.num_key_value_heads = new_num_kv_heads
@@ -90,6 +90,12 @@ def prune_attention_heads(
     
     attention.num_attention_heads = new_num_heads
     head_dim = attention.head_dim
+    
+    # Update config to reflect new head counts
+    if hasattr(attention, 'config'):
+        attention.config.num_attention_heads = new_num_heads
+        if maintain_gqa_ratio:
+            attention.config.num_key_value_heads = new_num_kv_heads
     
     # Helper function to prune linear layer
     def prune_linear(layer: nn.Linear, is_output: bool = False) -> nn.Linear:
@@ -144,8 +150,6 @@ def prune_llama_model(
     model: nn.Module,
     config: PruningConfig = PruningConfig()
 ) -> nn.Module:
-    print(f"Starting pruning with config: {config}")
-    print(f"Model config: {model.config}")
     """Prune attention heads in LlamaForCausalLM model.
     
     Args:
@@ -155,27 +159,67 @@ def prune_llama_model(
     Returns:
         Pruned model
     """
-    # Get importance metric
-    importance_metric = get_importance_metric(config)
+    print(f"Starting pruning with config: {config}")
+    print(f"Model config: {model.config}")
     
-    # Compute importance scores
-    importance_scores = importance_metric(model)
-    
-    # Select heads to prune
-    heads_to_prune = select_heads_to_prune(
-        importance_scores,
-        config.pruning_rate,
-        config.maintain_gqa_ratio,
-        num_kv_heads=model.config.num_key_value_heads
-    )
-    
-    # Prune heads in each layer
-    for layer_idx, heads in heads_to_prune.items():
-        layer = model.model.layers[layer_idx]
-        prune_attention_heads(
-            layer.self_attn,
-            heads,
-            config.maintain_gqa_ratio
+    try:
+        # Get importance metric
+        importance_metric = get_importance_metric(config)
+        print("Computing importance scores...")
+        importance_scores = importance_metric(model)
+        print(f"Importance scores computed for {len(importance_scores)} layers")
+        
+        # Select heads to prune
+        print("Selecting heads to prune...")
+        heads_to_prune = select_heads_to_prune(
+            importance_scores,
+            config.pruning_rate,
+            config.maintain_gqa_ratio,
+            num_kv_heads=model.config.num_key_value_heads
         )
-    
-    return model
+        print(f"Selected heads to prune: {heads_to_prune}")
+        
+        # Calculate new head counts
+        old_num_heads = model.config.num_attention_heads
+        old_num_kv_heads = model.config.num_key_value_heads
+        num_pruned_heads = sum(len(heads) for heads in heads_to_prune.values())
+        new_num_heads = old_num_heads - num_pruned_heads
+        
+        if config.maintain_gqa_ratio:
+            heads_per_kv = old_num_heads // old_num_kv_heads
+            new_num_kv_heads = max(1, new_num_heads // heads_per_kv)
+        else:
+            new_num_kv_heads = old_num_kv_heads
+            
+        # Update model config
+        model.config.num_attention_heads = new_num_heads
+        model.config.num_key_value_heads = new_num_kv_heads
+        
+        # Prune heads in each layer
+        print("Pruning heads...")
+        for layer_idx, heads in heads_to_prune.items():
+            layer = model.model.layers[layer_idx]
+            print(f"Pruning layer {layer_idx}, heads {heads}")
+            prune_attention_heads(
+                layer.self_attn,
+                heads,
+                config.maintain_gqa_ratio
+            )
+            
+        # Validate model can still do forward pass
+        print("Validating pruned model...")
+        try:
+            dummy_input = torch.randint(0, 100, (1, 32), device=model.device)
+            model(dummy_input)
+            print("Forward pass validation successful")
+        except Exception as e:
+            print(f"Forward pass validation failed: {str(e)}")
+            raise
+            
+        print("Pruning completed successfully")
+        return model
+    except Exception as e:
+        print(f"Error during pruning: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise
