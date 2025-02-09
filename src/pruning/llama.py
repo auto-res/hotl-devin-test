@@ -74,28 +74,18 @@ def prune_attention_heads(
     # Sort heads to prune in descending order
     heads_to_prune = sorted(heads_to_prune, reverse=True)
     
-    # Calculate new dimensions
-    old_num_heads = attention.num_attention_heads
-    old_num_kv_heads = attention.num_key_value_heads
+    # Get dimensions from model config
+    config = attention.q_proj.weight.shape  # [num_heads * head_dim, hidden_size]
+    hidden_size = config[1]
+    head_dim = hidden_size // attention.config.num_attention_heads
+    old_num_heads = attention.config.num_attention_heads
+    old_num_kv_heads = attention.config.num_key_value_heads
     new_num_heads = old_num_heads - len(heads_to_prune)
     
     if maintain_gqa_ratio:
         # Calculate new number of KV heads
         heads_per_kv = old_num_heads // old_num_kv_heads
         new_num_kv_heads = max(1, new_num_heads // heads_per_kv)
-        
-        # Update module attributes
-        attention.num_key_value_heads = new_num_kv_heads
-        attention.num_key_value_groups = new_num_heads // new_num_kv_heads
-    
-    attention.num_attention_heads = new_num_heads
-    head_dim = attention.head_dim
-    
-    # Update config to reflect new head counts
-    if hasattr(attention, 'config'):
-        attention.config.num_attention_heads = new_num_heads
-        if maintain_gqa_ratio:
-            attention.config.num_key_value_heads = new_num_kv_heads
     
     # Helper function to prune linear layer
     def prune_linear(layer: nn.Linear, is_output: bool = False) -> nn.Linear:
@@ -105,18 +95,18 @@ def prune_attention_heads(
         if is_output:
             # For output projection, we need to handle multiple heads
             old_shape = old_weight.shape
-            weight = old_weight.view(old_shape[0], old_num_heads, -1)
+            weight = old_weight.view(old_shape[0], old_num_heads, head_dim)
             # Remove pruned heads
             for head in heads_to_prune:
                 weight = torch.cat([weight[:, :head], weight[:, head+1:]], dim=1)
             weight = weight.reshape(old_shape[0], -1)
         else:
             # For Q/K/V projections
-            weight = old_weight.view(old_num_heads, head_dim, -1)
+            weight = old_weight.view(old_num_heads, head_dim, hidden_size)
             # Remove pruned heads
             for head in heads_to_prune:
                 weight = torch.cat([weight[:head], weight[head+1:]], dim=0)
-            weight = weight.reshape(-1, old_weight.shape[1])
+            weight = weight.reshape(-1, hidden_size)
             
             if old_bias is not None:
                 bias = old_bias.view(old_num_heads, head_dim)
@@ -145,6 +135,11 @@ def prune_attention_heads(
         attention.k_proj = prune_linear(attention.k_proj)
         attention.v_proj = prune_linear(attention.v_proj)
     attention.o_proj = prune_linear(attention.o_proj, is_output=True)
+    
+    # Update attention module attributes
+    if maintain_gqa_ratio:
+        attention.num_key_value_heads = new_num_kv_heads
+        attention.num_key_value_groups = new_num_heads // new_num_kv_heads
 
 def prune_llama_model(
     model: nn.Module,
