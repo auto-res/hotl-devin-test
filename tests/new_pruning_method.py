@@ -10,7 +10,7 @@ def train_with_pruning_method(pruning_func):
         per_device_train_batch_size=2,
         gradient_accumulation_steps=4,
         warmup_steps=5,
-        num_train_epochs=1,
+        num_train_epochs=8,
         learning_rate=2e-4,
         logging_steps=1,
         weight_decay=0.01,
@@ -42,6 +42,7 @@ def train_with_pruning_method(pruning_func):
         return {'text': texts}
     dataset = load_dataset("openai/gsm8k", "main")
     dataset = dataset["train"].map(_format_gsm8k, batched=True)
+    dataset = dataset[:32]
 
     # Apply new pruning method
     model = pruning_func(model)
