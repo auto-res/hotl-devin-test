@@ -18,7 +18,7 @@ When implementing a new method in research, it is wise to follow these guideline
 """
 
 
-def train_with_pruning_method(pruning_func):
+def train():
     # SFT config
     sft_config_test = SFTConfig(
         per_device_train_batch_size=2,
